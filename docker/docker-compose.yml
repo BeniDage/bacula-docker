@@ -1,0 +1,40 @@
+version: '3'
+
+services:
+  bacularis:
+    image: bacularis/bacularis-standalone:latest
+    container_name: bacularis
+    restart: unless-stopped
+    ports:
+      - "9097:9097"  # Web Interface
+    volumes:
+      - bacula_config:/var/lib/bacula
+      - bacula_logs:/var/log/bacula
+    environment:
+      - POSTGRES_USER=bacula
+      - POSTGRES_PASSWORD=bacula_password
+      - POSTGRES_DB=bacula
+    networks:
+      - bacula-network
+
+  postgres:
+    image: postgres:latest
+    container_name: bacula-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=bacula
+      - POSTGRES_PASSWORD=bacula_password
+      - POSTGRES_DB=bacula
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - bacula-network
+
+networks:
+  bacula-network:
+    driver: bridge
+
+volumes:
+  bacula_config:
+  bacula_logs:
+  postgres_data:

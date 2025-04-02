@@ -1,0 +1,106 @@
+services:
+  minioserver:
+    image: minio/minio
+    container_name: minioserver
+    ports:
+      - 9000:9000  # MinIO API
+      - 9001:9001  # MinIO Console
+    environment:
+      MINIO_ROOT_USER: adminuser
+      MINIO_ROOT_PASSWORD: adminpassword
+    command: server /data --console-address :9001
+    volumes:
+      - minio-data:/data
+      - minio-config:/root/.minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - shared-network  # Attach to the shared network
+
+  ready_minio:
+    image: minio/mc
+    container_name: ready_minio
+    depends_on:
+      minioserver:
+        condition: service_healthy  # Wait for MinIO to be healthy
+    #env_file:
+     # - ./envs/local.env  # Load environment variables from a file
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minioserver:9000 adminuser adminpassword &&
+      if ! mc ls myminio/restic-backups > /dev/null 2>&1; then
+        mc mb myminio/restic-backups;
+      fi &&
+      echo 'Creating /localbackup folder if it does not exist...' &&
+      mkdir -p /localbackup &&
+      echo 'MinIO bucket setup completed.' &&
+      while true; do
+        echo 'Mirroring MinIO bucket to local directory...';
+        mc mirror --overwrite myminio/restic-backups /localbackup;
+        echo 'Mirror completed. Sleeping for 2.5 minutes...';
+        sleep 150;
+      done
+      "
+    volumes:
+      - ./localbackup:/localbackup  # Mount the local backup directory
+    networks:
+      - shared-network  # Attach to the shared network
+
+
+  restic:
+    image: restic/restic
+    container_name: restic-backup
+    depends_on:
+      ready_minio:
+        condition: service_started  # Ensure ready_minio starts first
+    networks:
+      - shared-network  # Attach to the bridge network
+    environment:
+      RESTIC_REPOSITORY: "/backup/restic-repo"
+      RESTIC_PASSWORD_FILE: "/restic-password.txt/restic-password.txt"
+      ##MINIO_ROOT_USER: adminuser
+      #MINIO_ROOT_PASSWORD: adminpassword
+    volumes:
+      - ./backup:/backup
+      - ./restic-password.txt:/restic-password.txt
+      - ./restore:/restore
+      - ./localbackup:/localbackup  # Mount the local backup directory
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        
+        # Create Restic backup repository if not exists
+        if ! restic snapshots > /dev/null 2>&1; then
+          echo "Initializing Restic repository..."
+          restic init
+        fi
+
+        # Start backup loop
+        while true; do
+          echo "Syncing MinIO bucket to local storage..."
+          
+
+          echo "Starting Restic backup..."
+          restic backup /localbackup
+
+          echo "Backup completed. Deleting files from /localbackup..."
+          find /localbackup -type f -delete
+
+          echo "Sleeping for 4 min..."
+          sleep 200
+        done
+        
+
+volumes:
+  minio-data:
+  minio-config:
+  localbackup:  # Define the shared volume
+    driver: local
+
+networks:
+  shared-network:
+    driver: bridge
