@@ -2,38 +2,41 @@ services:
   restic:
     image: restic/restic
     container_name: restic-backup
-    networks:
-      - shared-network  # Attach to the bridge network
+    #depends_on:
+      #minioserver:
+        #condition: service_started
     environment:
       RESTIC_REPOSITORY: "/backup/restic-repo"
       RESTIC_PASSWORD_FILE: "/restic-password.txt/restic-password.txt"
-      ##MINIO_ROOT_USER: adminuser
-      #MINIO_ROOT_PASSWORD: adminpassword
     volumes:
+      - data-lakehouse_minio-data:/data-lakehouse_minio-data
+      - data-lakehouse_minio-config:/data-lakehouse_minio-config
+      - fileuploadservice_dremio-data:/fileuploadservice_dremio-data
+      - dp-postgres-data:/dp-postgres-data
+      - dp-es-data:/dp-es-data
+      - dp-logstash-data:/dp-logstash-data
       - ./backup:/backup
       - ./restic-password.txt:/restic-password.txt
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        
-        # Create Restic backup repository if not exists
-        if ! restic snapshots > /dev/null 2>&1; then
-          restic init
-        fi
+      - ./restore:/restore
+      - ./scripts/backup.sh:/scripts/backup.sh
+    entrypoint: ["/bin/sh", "-c", "/scripts/backup.sh"]
+    networks:
+      - coredwinfrastructure_dw_network
 
-        # Start backup loop
-        while true; do
-          echo "Syncing MinIO bucket to local storage..."
-          
-
-          echo "Starting Restic backup..."
-          restic backup /backup/restic-repo
-
-          echo "Backup completed. Sleeping for 5 min..."
-          sleep 300
-        done
-        
+volumes:
+  data-lakehouse_minio-data:
+    external: true
+  data-lakehouse_minio-config:
+    external: true
+  fileuploadservice_dremio-data:
+    external: true
+  dp-postgres-data:
+    external: true
+  dp-es-data:
+    external: true
+  dp-logstash-data:
+    external: true
 
 networks:
-  shared-network:
-    driver: bridge  # Use the external bridge network
+  coredwinfrastructure_dw_network:
+    external: true
